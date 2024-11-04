@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import shutil
@@ -12,7 +12,7 @@ app = FastAPI()
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://saroperation.netlify.app/"],
+    allow_origins=["https://saroperation.netlify.app"],  # Specify your frontend URL here
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,7 +26,7 @@ os.makedirs("results", exist_ok=True)
 model = YOLO("model/best_sar_model.pt")
 
 @app.post("/detect")
-async def detect_objects(file: UploadFile = File(...)):
+async def detect_objects(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     # Generate unique filename
     file_id = str(uuid.uuid4())
     input_path = f"uploads/{file_id}.jpg"
@@ -39,15 +39,23 @@ async def detect_objects(file: UploadFile = File(...)):
     # Run inference
     results = model(input_path)
     
-    # Save result
+    # Save result image
     result_img = Image.fromarray(results[0].plot())
     result_img.save(output_path)
     
-    # Cleanup input file
-    os.remove(input_path)
+    # Schedule cleanup of both input and output files after response is sent
+    background_tasks.add_task(cleanup_files, input_path, output_path)
     
-    # Return result image
+    # Return the result image
     return FileResponse(output_path)
+
+def cleanup_files(*paths):
+    """Delete files from given paths."""
+    for path in paths:
+        try:
+            os.remove(path)
+        except Exception as e:
+            print(f"Failed to delete {path}: {e}")
 
 if __name__ == "__main__":
     import uvicorn
